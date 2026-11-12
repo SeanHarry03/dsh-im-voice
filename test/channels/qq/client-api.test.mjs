@@ -20,10 +20,12 @@ test('QQ client keeps only redacted bot and host-rendered QR state', () => {
       botId: 'qq_abc', connected: true, state: 'connected',
       bot: { name: 'QQ机器人', appIdMasked: '123••••456' },
       health: { summary: '运行正常' },
+      voice: { mode: 'always', maxCharacters: 900 },
     }],
   });
   assert.equal(snapshot.totals.connected, 1);
   assert.equal(snapshot.bots[0].bot.appIdMasked, '123••••456');
+  assert.deepEqual(snapshot.bots[0].voice, { mode: 'always', maxCharacters: 900 });
 });
 
 test('QQ client normalizes and presents connection-test outcomes', () => {

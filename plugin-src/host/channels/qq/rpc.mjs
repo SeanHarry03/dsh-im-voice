@@ -15,6 +15,7 @@ import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } f
 import { publicQqStateError } from '../../../../src/channels/qq/state-error.mjs';
 import { SET_AGENT_PRESET_ENDPOINT, validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
 import { SET_MODEL_ENDPOINT, validModelPayload } from '../shared/model-setting-rpc.mjs';
+import { validQqVoiceConfig } from '../../../../src/channels/qq/voice-config.mjs';
 
 export const QQ_RPC_CHANNEL = '/qq';
 export const QQ_ENDPOINTS = Object.freeze({
@@ -32,6 +33,7 @@ export const QQ_ENDPOINTS = Object.freeze({
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
+  setVoice: 'bot.voice.set',
 });
 export const QQ_RPC_ENDPOINTS = Object.freeze(Object.values(QQ_ENDPOINTS));
 
@@ -108,6 +110,11 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === QQ_ENDPOINTS.setAlias) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
+  }
+  if (endpoint === QQ_ENDPOINTS.setVoice) {
+    return exactKeys(payload, ['botId', 'voice']) && validId(payload.botId)
+      && validQqVoiceConfig(payload.voice)
+      ? null : 'bot.voice.set requires a valid botId and voice configuration.';
   }
   return 'Unknown QQ endpoint.';
 }
@@ -238,6 +245,12 @@ export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
         if (typeof controller.updateAgentPreset !== 'function') throw new Error('Agent preset update is unavailable');
         value = await publicStatus(
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
+          cachedEncode,
+        );
+      } else if (endpoint === QQ_ENDPOINTS.setVoice) {
+        if (typeof controller.updateVoice !== 'function') throw new Error('QQ voice update is unavailable');
+        value = await publicStatus(
+          await controller.updateVoice(payload.botId, payload.voice),
           cachedEncode,
         );
       } else {

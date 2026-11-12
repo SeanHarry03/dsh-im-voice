@@ -152,6 +152,10 @@ export async function createProductionController(ctx, config = {}, internals = {
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'qq', config: botConfig,
         }),
+        speechSynthesis: () => {
+          try { return ctx.get?.('speechSynthesis'); }
+          catch { return undefined; }
+        },
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
         connectTimeoutMs: config.connectTimeoutMs ?? 20_000,
         logger: {

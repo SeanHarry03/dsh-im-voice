@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { t } from '../shared/i18n.mjs';
+import { storedQqVoiceConfig, validQqVoiceConfig } from './voice-config.mjs';
 
 const EMPTY_DOCUMENT = Object.freeze({ version: 1, bots: Object.freeze([]) });
 
@@ -45,6 +46,8 @@ function normalizeBot(value) {
   if (!appId || !ownerUserOpenid || !botId || !secretRef) return null;
   const derived = deriveQqBotIdentity(appId);
   if (derived.botId !== botId || derived.secretRef !== secretRef) return null;
+  if (value.voice != null && !validQqVoiceConfig(value.voice)) return null;
+  const voice = storedQqVoiceConfig(value.voice);
   return Object.freeze({
     botId,
     appId,
@@ -52,6 +55,7 @@ function normalizeBot(value) {
     ownerUserOpenid,
     createdAt: cleanString(value.createdAt) ?? new Date().toISOString(),
     connectedAt: cleanString(value.connectedAt),
+    ...(voice ? { voice } : {}),
   });
 }
 

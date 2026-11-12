@@ -6,6 +6,7 @@ import { t } from '../shared/i18n.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
 import { deriveQqBotIdentity, maskQqAppId } from './config-store.mjs';
 import { publicQqStateError } from './state-error.mjs';
+import { normalizeQqVoiceConfig, storedQqVoiceConfig } from './voice-config.mjs';
 
 const ACTIVE_ATTEMPT_STATES = new Set(['starting', 'pending', 'refreshing', 'connecting']);
 const TERMINAL_ATTEMPT_STATES = new Set(['connected', 'failed', 'cancelled']);
@@ -340,6 +341,30 @@ export class QqController {
     return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
+  async updateVoice(botId, value) {
+    const previous = this.#configStore.get(botId);
+    if (!previous) throw new Error('Unknown QQ bot');
+    const voice = storedQqVoiceConfig(value);
+    const { voice: _discardedVoice, ...base } = previous;
+    const next = voice ? { ...base, voice } : base;
+    return this.#withBotTransition(botId, async () => {
+      const appSecret = await this.#resolveSecret(previous.secretRef);
+      if (!appSecret) throw new Error('QQ bot secret is missing');
+      await atConnectionStage('account.save', () => this.#configStore.save(next), 'account-config');
+      try {
+        await this.#startRuntime(next, appSecret);
+        this.#errors.delete(botId);
+      } catch (error) {
+        await atConnectionStage('account.save', () => this.#configStore.save(previous), 'account-config')
+          .catch(() => undefined);
+        await this.#startRuntime(previous, appSecret).catch(() => undefined);
+        throw error;
+      }
+      this.#touch();
+      return this.status();
+    });
+  }
+
   status() {
     const bots = this.#configStore.list().map((config) => {
       const runtimeStatus = this.#runtimes.get(config.botId)?.status ?? null;
@@ -368,6 +393,7 @@ export class QqController {
           messagesReceived: runtimeStatus?.messagesReceived ?? 0,
           messagesReplied: runtimeStatus?.messagesReplied ?? 0,
         },
+        voice: normalizeQqVoiceConfig(config.voice),
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
         error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };

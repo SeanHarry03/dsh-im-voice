@@ -253,3 +253,37 @@ test('QQ reconnect RPC reports test-message outcomes without discarding the snap
     botId: 'qq_bot', sendTest: false,
   })).ok, false);
 });
+
+test('QQ voice RPC validates and forwards only the bot-scoped voice policy', async () => {
+  const calls = [];
+  const handler = createQqRpcHandler({
+    status: () => ({ bots: [], totals: { configured: 0, connected: 0 } }),
+    startProvisioning: async () => ({}),
+    registrationStatus: () => null,
+    cancelProvisioning: async () => ({}),
+    bindCredentials: async () => ({}),
+    reconnectBot: async () => ({}),
+    deleteBot: async () => ({}),
+    updateVoice: async (botId, voice) => {
+      calls.push({ botId, voice });
+      return {
+        bots: [{ botId, voice }],
+        totals: { configured: 1, connected: 1 },
+      };
+    },
+  });
+
+  const voice = { mode: 'always', maxCharacters: 800 };
+  const result = await handler(QQ_ENDPOINTS.setVoice, { botId: 'qq_bot', voice });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [{ botId: 'qq_bot', voice }]);
+  assert.deepEqual(result.value.bots[0].voice, voice);
+
+  assert.equal((await handler(QQ_ENDPOINTS.setVoice, {
+    botId: 'qq_bot', voice: { mode: 'sometimes', maxCharacters: 800 },
+  })).ok, false);
+  assert.equal((await handler(QQ_ENDPOINTS.setVoice, {
+    botId: 'qq_bot', voice, apiKey: 'must-not-be-accepted',
+  })).ok, false);
+  assert.equal(calls.length, 1);
+});

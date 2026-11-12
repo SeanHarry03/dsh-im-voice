@@ -25,6 +25,7 @@ export const QQ_ENDPOINTS = Object.freeze({
   setBusyMessageMode: 'bot.message-mode.set',
   setAccessPolicy: 'bot.access-policy.set',
   setAlias: 'bot.alias.set',
+  setVoice: 'bot.voice.set',
 });
 
 const PROVISION_STATES = new Set(['starting', 'pending', 'refreshing', 'connecting', 'connected', 'failed', 'cancelled']);
@@ -103,6 +104,7 @@ function normalizeBot(value) {
     model: normalizeModelSelection(value.model),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     busyMessageMode: normalizeBusyMessageMode(value.busyMessageMode),    contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+    voice: normalizeQqVoice(value.voice),
     ...(Object.hasOwn(value, 'accessPolicy')
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),
@@ -122,6 +124,15 @@ function normalizeBot(value) {
       message: text(value.error.message, 'QQ 连接尚未就绪'),
     } : null,
   };
+}
+
+export function normalizeQqVoice(value) {
+  const source = isRecord(value) ? value : {};
+  const mode = ['off', 'voice-input', 'always'].includes(source.mode) ? source.mode : 'off';
+  const maxCharacters = Number.isInteger(source.maxCharacters)
+    ? Math.min(12_000, Math.max(1, source.maxCharacters))
+    : 1200;
+  return { mode, maxCharacters };
 }
 
 function normalizeTestMessage(value) {

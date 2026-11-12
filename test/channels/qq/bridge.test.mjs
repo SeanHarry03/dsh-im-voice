@@ -141,6 +141,21 @@ test('QQ maps msgElements quote snapshots and prefers voice ASR text', () => {
   });
 });
 
+test('QQ uses the platform ASR transcript for a direct voice message', () => {
+  const inbound = qqInboundMessage(message({
+    content: '',
+    attachments: [{
+      content_type: 'voice',
+      filename: 'voice.silk',
+      voice_wav_url: 'https://multimedia.nt.qq.com.cn/voice.wav',
+      asr_refer_text: '这是语音识别结果',
+    }],
+  }));
+  assert.equal(inbound.content, '这是语音识别结果');
+  assert.equal(inbound.voiceInput, true);
+  assert.deepEqual(inbound.files, []);
+});
+
 test('QQ sends quote context to Harness but does not execute quoted commands', async () => {
   const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
   let clears = 0;
@@ -1136,6 +1151,72 @@ test('QQ private messages deliver the final answer as Markdown without opening a
   assert.equal(seen.has('msg-1'), true);
   assert.equal(bridge.status.messagesReplied, 1);
   assert.deepEqual(receipt.providerMessageIds, ['qq-private-markdown']);
+});
+
+test('QQ keeps the text reply and adds a best-effort voice reply through the shared speech service', async () => {
+  const markdown = [];
+  const voices = [];
+  const synthesized = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      send: async (options) => { markdown.push(options); return { message: { id: 'text-voice-pair' } }; },
+      sendText: async () => {},
+      sendVoice: async (target, source) => {
+        voices.push({ target, source });
+        return { message: { id: 'voice-reply' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    voice: { mode: 'always', maxCharacters: 1200 },
+    speechSynthesis: () => ({
+      synthesize: async (request) => { synthesized.push(request); return { data: Buffer.from('wav') }; },
+    }),
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => '**最终回答**',
+    },
+    state: {
+      hasSeen: () => false,
+      markSeen: async () => {},
+      sessionFor: () => 'session-voice',
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+  });
+  await bridge.accept(message({ messageId: 'voice-output' }));
+  assert.equal(markdown.length, 1);
+  assert.equal(synthesized[0].text, '最终回答');
+  assert.equal(synthesized[0].format, 'wav');
+  assert.equal(voices[0].source.buffer.toString(), 'wav');
+  assert.equal(bridge.status.voiceRepliesSent, 1);
+  assert.equal(bridge.status.voiceReplyErrors, 0);
+});
+
+test('QQ speech failure leaves the successful text reply intact', async () => {
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      send: async (options) => { markdown.push(options); return { message: { id: 'text-fallback' } }; },
+      sendText: async () => {},
+      sendVoice: async () => assert.fail('voice upload must not run after synthesis failure'),
+    },
+    ownerUserOpenid: 'owner-openid',
+    voice: { mode: 'always', maxCharacters: 1200 },
+    speechSynthesis: () => ({ synthesize: async () => { throw new Error('provider unavailable'); } }),
+    harness: { sessionExists: async () => true, ask: async () => '仍然保留文字' },
+    state: {
+      hasSeen: () => false,
+      markSeen: async () => {},
+      sessionFor: () => 'session-voice-fallback',
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept(message({ messageId: 'voice-fallback' }));
+  assert.equal(markdown.length, 1);
+  assert.equal(bridge.status.voiceRepliesSent, 0);
+  assert.equal(bridge.status.voiceReplyErrors, 1);
 });
 
 test('QQ group messages suppress every successful progress update', async () => {

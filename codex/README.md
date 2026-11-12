@@ -34,3 +34,17 @@ github:SeanHarry03/dsh-im-voice#custom
 The plugin UI can still query the original `@xmanrui/dsh-im` npm release. It
 must not install that npm release over this source checkout; upstream code is
 merged through this guarded workflow instead.
+
+## QQ voice replies
+
+The QQ channel consumes the optional Host service named `speechSynthesis`.
+Install and configure `dsh-xiaomi-tts`, then select the QQ bot's voice-reply
+rule in the IM settings. The TTS provider, model, voice, and API credential stay
+owned by the speech plugin; this fork stores only the QQ delivery rule and the
+per-segment character limit.
+
+Text delivery remains authoritative. Voice synthesis and QQ voice upload are
+best-effort additions after the text reply, so a missing provider, invalid
+credential, quota failure, or rejected voice upload does not interrupt the
+conversation. The integration requests WAV from the shared service and uses the
+QQ SDK's native `sendVoice` transport.

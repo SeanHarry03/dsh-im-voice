@@ -87,6 +87,7 @@ import {
 import { withSessionBindingLock } from '../shared/session-binding-lock.mjs';
 import { t } from '../shared/i18n.mjs';
 import { isQqMessageAddressed, normalizeQqMentions } from './qq-mention.mjs';
+import { sendQqVoiceReply, shouldSendQqVoice } from './voice-reply.mjs';
 
 function interactionResolvedText() {
   return t('这个问题已在其他客户端处理，无需再次回答。');
@@ -191,7 +192,8 @@ function hasQqFileAttachments(message) {
 function qqAttachmentKind(attachment) {
   const mediaType = attachmentMediaType(attachment);
   if (mediaType?.startsWith('image/')) return 'image';
-  if (mediaType?.startsWith('audio/')) return 'audio';
+  if (mediaType === 'voice' || mediaType?.startsWith('audio/')
+    || nonEmptyString(attachment?.voice_wav_url) || nonEmptyString(attachment?.asr_refer_text)) return 'audio';
   if (mediaType?.startsWith('video/')) return 'video';
   return 'file';
 }
@@ -238,11 +240,22 @@ export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
   const images = [];
   const files = [];
+  const voiceTranscripts = [];
+  let voiceInput = false;
   for (const attachment of message?.attachments ?? []) {
-    const url = nonEmptyString(attachment?.url);
+    const kind = qqAttachmentKind(attachment);
+    const url = nonEmptyString(attachment?.voice_wav_url) ?? nonEmptyString(attachment?.url);
     const name = nonEmptyString(attachment?.filename) ?? undefined;
     const mediaType = attachmentMediaType(attachment);
     const declaredSize = Number(attachment?.size);
+    if (kind === 'audio') {
+      voiceInput = true;
+      const transcript = nonEmptyString(attachment?.asr_refer_text);
+      if (transcript) {
+        voiceTranscripts.push(transcript);
+        continue;
+      }
+    }
     if (isQqImageAttachment(attachment)) {
       images.push({
         ...(name ? { name } : {}),
@@ -271,10 +284,12 @@ export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
     });
   }
   const replyTo = qqReplyReference(message);
+  const transcript = voiceTranscripts.join('\n');
   return {
-    content: safeText(message),
+    content: transcript || safeText(message),
     images,
     files,
+    ...(voiceInput ? { voiceInput: true } : {}),
     ...(replyTo ? { replyTo } : {}),
   };
 }
@@ -465,6 +480,8 @@ export function createQqBridgeStatus() {
     messagesRejected: 0,
     artifactsSent: 0,
     artifactSendErrors: 0,
+    voiceRepliesSent: 0,
+    voiceReplyErrors: 0,
     lastMessageAt: null,
     lastReplyAt: null,
     lastRejectedAt: null,
@@ -488,6 +505,8 @@ export class QqHarnessBridge {
   #signal;
   #fetchImpl;
   #fileUploadTimeoutMs;
+  #voice;
+  #speechSynthesis;
   #queues = new Map();
   // Crash-recovery for #queues, started with the bridge; see recoverPendingMessages().
   #pendingRecovery = null;
@@ -517,6 +536,8 @@ export class QqHarnessBridge {
     signal,
     fetchImpl = fetch,
     fileUploadTimeoutMs = DEFAULT_FILE_UPLOAD_TIMEOUT_MS,
+    voice = null,
+    speechSynthesis = null,
   }) {
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('QQ bot client is required');
     if (!ownerUserOpenid) throw new TypeError('QQ scanner identity is required');
@@ -542,6 +563,8 @@ export class QqHarnessBridge {
     });
     this.#fetchImpl = fetchImpl;
     this.#fileUploadTimeoutMs = Math.min(fileUploadTimeoutMs, DEFAULT_FILE_UPLOAD_TIMEOUT_MS);
+    this.#voice = voice;
+    this.#speechSynthesis = speechSynthesis;
     this.#approvals = new HarnessApprovalQueue({ label: 'qq', logger });
     // A queued message lives only in #queues. If the process dies before its
     // turn runs the user has already been told it is queued, so the persisted
@@ -1459,11 +1482,42 @@ export class QqHarnessBridge {
         textSendError = channelDeliveryFailure(error);
         this.#logger.warn?.('[dsh-im:qq] final text delivery failed; continuing with result files:', error);
       }
-      const delivery = await this.#deliverArtifacts(target, messageId, artifacts, textReceipt);
+      let voiceReceipt = null;
+      if (shouldSendQqVoice(this.#voice, { voiceInput: promptMessage.voiceInput === true })) {
+        try {
+          const voiceDeliveries = await sendQqVoiceReply({
+            bot: this.#bot,
+            target,
+            text: answerText,
+            config: this.#voice,
+            speechSynthesis: this.#speechSynthesis,
+            signal: this.#signal,
+          });
+          if (voiceDeliveries.length > 0) {
+            voiceReceipt = createDeliveryReceipt({
+              deliveryId: `${messageId}:voice`,
+              presentation: 'qq-voice',
+              providerMessageIds: voiceDeliveries.flatMap((item) => providerMessageIdsFor(item)),
+            });
+            this.#status.voiceRepliesSent += voiceDeliveries.length;
+          }
+        } catch (error) {
+          if (!this.#signal?.aborted) {
+            this.#status.voiceReplyErrors += 1;
+            this.#logger.warn?.('[dsh-im:qq] voice reply failed; text reply remains available:', error);
+          }
+        }
+      }
+      const delivery = await this.#deliverArtifacts(
+        target,
+        messageId,
+        artifacts,
+        textReceipt ?? voiceReceipt,
+      );
       const artifactDispatched = delivery.receipt?.artifacts?.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
       );
-      if (textSendError && !artifactDispatched && !delivery.failureNoticeVisible) {
+      if (textSendError && !voiceReceipt && !artifactDispatched && !delivery.failureNoticeVisible) {
         throw textSendError;
       }
       if (textSendError && delivery.artifactSendErrors === 0) {

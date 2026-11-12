@@ -37,6 +37,7 @@ import {
   unwrapRpcResult,
 } from './api.js';
 import { installQqStyles } from './styles.js';
+import { QqVoiceEditor } from './voice-editor.js';
 
 const ACTIVE_STATES = new Set(['pending', 'refreshing', 'connecting']);
 
@@ -179,6 +180,7 @@ export function AccountCard({
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+  onVoiceSave,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -237,6 +239,11 @@ export function AccountCard({
         config: account.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(QqVoiceEditor, {
+        value: account.voice,
+        disabled: Boolean(busy),
+        onSave: onVoiceSave,
       }),
       h('div', { className: 'ddt-accountFooter dim-cardFooter' },
         h('div', { className: 'dim-cardFooterLayout' },
@@ -542,6 +549,12 @@ export function QqSettingsTab({ rpcCall }) {
               'context-enhancement',
               QQ_ENDPOINTS.setContextEnhancement,
               { botId: account.botId, config },
+            ),
+            onVoiceSave: (voice) => botAction(
+              account,
+              'voice',
+              QQ_ENDPOINTS.setVoice,
+              { botId: account.botId, voice },
             ),
             onRequestRemove: () => setRemoveTarget(account.botId),
             onCancelRemove: () => setRemoveTarget(null),

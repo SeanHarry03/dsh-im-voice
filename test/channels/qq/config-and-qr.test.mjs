@@ -18,6 +18,7 @@ test('QQ config stores only non-secret bot identity with mode 0600', async (t) =
     appId: '102345678',
     ownerUserOpenid: 'owner-openid',
     createdAt: '2026-08-15T00:00:00.000Z',
+    voice: { mode: 'always', maxCharacters: 800 },
   });
   const document = await readFile(path, 'utf8');
   assert.match(document, /102345678/);
@@ -29,6 +30,7 @@ test('QQ config stores only non-secret bot identity with mode 0600', async (t) =
     ownerUserOpenid: 'owner-openid',
     createdAt: '2026-08-15T00:00:00.000Z',
     connectedAt: null,
+    voice: { mode: 'always', maxCharacters: 800 },
   });
 });
 
